@@ -1,3 +1,3 @@
 <?php
-header('Location: ../register.php');
+header('Location: ../student/register.php');
 exit;

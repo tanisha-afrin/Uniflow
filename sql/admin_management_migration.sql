@@ -1,7 +1,7 @@
 ALTER TABLE admins
-    ADD COLUMN IF NOT EXISTS can_manage_admins TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active;
+    ADD COLUMN can_manage_admins TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active;
 
-CREATE TABLE IF NOT EXISTS admin_account_audit (
+CREATE TABLE admin_account_audit (
     audit_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     actor_admin_id INT NULL,
     target_admin_id INT NULL,

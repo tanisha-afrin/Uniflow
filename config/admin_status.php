@@ -7,79 +7,75 @@ if (empty($_SESSION['admin_id'])) {
     header('Location: ../login.php');
     exit;
 }
-
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     exit('POST required.');
 }
 
 $currentAdminId = (int)$_SESSION['admin_id'];
-$stmt = $conn->prepare('SELECT admin_id, role, admin_type, is_active, must_change_password, can_manage_admins FROM admins WHERE admin_id = ? LIMIT 1');
-$stmt->bind_param('i', $currentAdminId);
-$stmt->execute();
-$currentAdmin = $stmt->get_result()->fetch_assoc();
-$stmt->close();
-
-if ($currentAdmin && (int)$currentAdmin['must_change_password'] === 1) {
+$currentAdmin = getAdminManagementActor($conn, $currentAdminId);
+if (!$currentAdmin || (int)$currentAdmin['must_change_password'] === 1) {
     header('Location: ../change_password.php');
     exit;
 }
 if (!adminCanManageAccounts($currentAdmin)) {
     http_response_code(403);
-    exit(adminAccountManagementDenialMessage($currentAdmin));
+    exit('Administrator account management access required.');
 }
 
 $csrfToken = $_POST['csrf_token'] ?? '';
-if (!hash_equals((string)($_SESSION['admin_status_csrf'] ?? ''), $csrfToken)) {
+if (!isset($_SESSION['admin_status_csrf'])
+    || !is_string($csrfToken)
+    || !hash_equals((string)$_SESSION['admin_status_csrf'], $csrfToken)) {
     http_response_code(403);
     exit('Invalid security token. Reload Admin Management and try again.');
 }
 
-$targetAdminIdRaw = $_POST['admin_id'] ?? '';
-$isActiveRaw = $_POST['is_active'] ?? '';
-if (
-    !is_string($targetAdminIdRaw)
-    || !ctype_digit($targetAdminIdRaw)
-    || !in_array($isActiveRaw, ['0', '1'], true)
-) {
+$targetAdminId = filter_var($_POST['admin_id'] ?? null, FILTER_VALIDATE_INT);
+$isActive = filter_var($_POST['is_active'] ?? null, FILTER_VALIDATE_INT);
+if (!$targetAdminId || !in_array($isActive, [0, 1], true)) {
     http_response_code(400);
     exit('Invalid account status request.');
 }
 
-$targetAdminId = (int)$targetAdminIdRaw;
-$isActive = (int)$isActiveRaw;
-if ($targetAdminId <= 0 || $targetAdminId === $currentAdminId) {
-    http_response_code(400);
-    exit('Invalid account status request.');
-}
-
-$targetStmt = $conn->prepare('SELECT admin_id, admin_type, role, can_manage_admins FROM admins WHERE admin_id = ? LIMIT 1');
-$targetStmt->bind_param('i', $targetAdminId);
-$targetStmt->execute();
-$targetAdmin = $targetStmt->get_result()->fetch_assoc();
-$targetStmt->close();
+$stmt = $conn->prepare('SELECT admin_id, name, email, admin_type, is_active, can_manage_admins FROM admins WHERE admin_id = ? LIMIT 1');
+$stmt->bind_param('i', $targetAdminId);
+$stmt->execute();
+$targetAdmin = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 if (!$targetAdmin || !adminCanManageTarget($currentAdmin, $targetAdmin)) {
     http_response_code(403);
     exit('This account is outside your management access.');
 }
 
-if ($isActive === 0 && $targetAdmin['admin_type'] === 'admin') {
-    if ($targetAdmin['role'] === 'administrative') {
-        $activeManagers = $conn->query(
-            "SELECT COUNT(*) FROM admins WHERE admin_type = 'admin' AND role = 'administrative' AND is_active = 1"
-        )->fetch_row()[0];
-        if ((int)$activeManagers <= 1) {
-            http_response_code(409);
-            exit('The last active Administrative manager cannot be deactivated. Create and activate another Administrative account first.');
-        }
-    }
+if ((int)$targetAdmin['is_active'] === $isActive) {
+    header('Location: admin_management.php?status_unchanged=1');
+    exit;
 }
 
-$stmt = $conn->prepare('UPDATE admins SET is_active = ? WHERE admin_id = ? AND admin_type = \'admin\'');
-$stmt->bind_param('ii', $isActive, $targetAdminId);
-$stmt->execute();
-$updated = $stmt->affected_rows;
-$stmt->close();
+$conn->begin_transaction();
+try {
+    $managerGuard = ($currentAdmin['admin_type'] ?? 'admin') === 'main_admin' ? '' : ' AND can_manage_admins = 0';
+    $stmt = $conn->prepare("UPDATE admins SET is_active = ? WHERE admin_id = ? AND admin_type = 'admin'{$managerGuard}");
+    $stmt->bind_param('ii', $isActive, $targetAdminId);
+    if (!$stmt->execute() || $stmt->affected_rows !== 1) {
+        throw new RuntimeException('Account status was not changed.');
+    }
+    $stmt->close();
 
-header('Location: admin_management.php?' . ($updated > 0 ? 'status_updated=1' : 'status_unchanged=1'));
-exit;
+    $action = $isActive === 1 ? 'activated' : 'deactivated';
+    if (!writeAdminAccountAudit($conn, $currentAdminId, $targetAdminId, $action, [
+        'name' => $targetAdmin['name'] ?? null,
+        'email' => $targetAdmin['email'] ?? null
+    ])) {
+        throw new RuntimeException('Could not write the account audit record.');
+    }
+    $conn->commit();
+    header('Location: admin_management.php?status_updated=1');
+    exit;
+} catch (Throwable $e) {
+    $conn->rollback();
+    error_log('UniFlow admin status update failed: ' . $e->getMessage());
+    http_response_code(500);
+    exit('Could not update the administrator account status.');
+}

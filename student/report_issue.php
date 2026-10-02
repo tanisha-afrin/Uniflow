@@ -929,6 +929,7 @@ body::before{
 
 </style>
 
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
 

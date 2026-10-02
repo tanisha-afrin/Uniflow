@@ -56,8 +56,9 @@ function admin_has_access(string $portal): bool
 
     $adminType = $_SESSION['admin_type'] ?? 'admin';
     $role = $_SESSION['admin_role'] ?? '';
-    if ($adminType === 'main_admin') return true;
-    if ($role === $portal) return true;
+    // System Admin is responsible for accounts and system settings; service
+    // portal access still requires an explicit permission assignment.
+    if ($adminType !== 'main_admin' && $role === $portal) return true;
 
     $stmt = $conn->prepare('SELECT access_id FROM admin_access WHERE admin_id = ? AND access_area = ? LIMIT 1');
     if (!$stmt) return false;

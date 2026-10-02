@@ -544,6 +544,7 @@ body.form-page:after{
     .form-actions>*{width:100%!important}
 }
 </style>
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 <body class="form-page">
 

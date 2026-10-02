@@ -22,27 +22,13 @@ function adminCanManageAccounts(?array $admin): bool
     }
 
     return ($admin['admin_type'] ?? 'admin') === 'main_admin'
-        || (($admin['admin_type'] ?? 'admin') === 'admin' && ($admin['role'] ?? '') === 'administrative')
         || (int)($admin['can_manage_admins'] ?? 0) === 1;
-}
-
-function adminAccountManagementDenialMessage(?array $admin): string
-{
-    if (!$admin) {
-        return 'Your administrator account could not be loaded. Sign out and sign in again.';
-    }
-    if ((int)($admin['is_active'] ?? 0) !== 1) {
-        return 'Your administrator account is inactive. Contact the Administrative team.';
-    }
-    if ((int)($admin['must_change_password'] ?? 0) === 1) {
-        return 'Change your password before managing administrator accounts.';
-    }
-    return 'This portal account cannot manage administrator accounts. Sign in with an active Administrative account.';
 }
 
 function adminCanManageTarget(array $actor, array $target): bool
 {
-    if ((int)$actor['admin_id'] === (int)$target['admin_id']) {
+    if ((int)$actor['admin_id'] === (int)$target['admin_id']
+        || ($target['admin_type'] ?? 'admin') !== 'admin') {
         return false;
     }
 
@@ -50,13 +36,8 @@ function adminCanManageTarget(array $actor, array $target): bool
         return true;
     }
 
-    if (($target['admin_type'] ?? 'admin') !== 'admin') {
-        return false;
-    }
-
-    return ($actor['role'] ?? '') === 'administrative'
-        || ((int)($actor['can_manage_admins'] ?? 0) === 1
-            && (int)($target['can_manage_admins'] ?? 0) !== 1);
+    return (int)($actor['can_manage_admins'] ?? 0) === 1
+        && (int)($target['can_manage_admins'] ?? 0) !== 1;
 }
 
 function writeAdminAccountAudit(
@@ -79,3 +60,4 @@ function writeAdminAccountAudit(
     $stmt->close();
     return $saved;
 }
+

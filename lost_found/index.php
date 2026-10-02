@@ -178,6 +178,7 @@ if (
         href="style.css"
     >
 
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
 

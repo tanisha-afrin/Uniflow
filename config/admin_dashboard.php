@@ -2,6 +2,7 @@
 
 require_once "database.php";
 require_once "auth.php";
+require_once __DIR__ . '/admin_management_access.php';
 
 /* =========================
    LOGOUT
@@ -30,6 +31,10 @@ if (isset($_GET["logout"])) {
 }
 
 admin_required($admin_role);
+
+$currentAdminForNav = getAdminManagementActor($conn, (int)$_SESSION['admin_id']);
+$showAdminManagementLink = adminCanManageAccounts($currentAdminForNav)
+    && ($currentAdminForNav['admin_type'] ?? 'admin') !== 'main_admin';
 
 
 /* =========================
@@ -2920,6 +2925,7 @@ tbody tr:hover{
 
 </style>
 
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
 
@@ -2966,9 +2972,10 @@ Home
 
 </a>
 
-<?php if ($admin_role === "administrative"): ?>
+<?php if ($showAdminManagementLink): ?>
 <a class="nav-button" href="../config/admin_management.php">Admin Management</a>
 <?php endif; ?>
+
 
 <a
     class="nav-button primary"

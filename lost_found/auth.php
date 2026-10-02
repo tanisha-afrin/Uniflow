@@ -37,21 +37,12 @@ function isLostFoundModerator(): bool {
             return $result = false;
         }
 
-        if ($admin['admin_type'] === 'main_admin') {
-            return $result = true;
-        }
-
-        if (in_array($admin['role'], ['technical', 'proctorial'], true)) {
-            return $result = false;
-        }
-
-        if ($admin['role'] === 'lost_found') {
-            return $result = true;
-        }
-
         $stmt = $pdo->prepare('SELECT 1 FROM admin_access WHERE admin_id = ? AND access_area = ? LIMIT 1');
         $stmt->execute([currentAdminId(), 'lost_found']);
-        return $result = (bool)$stmt->fetchColumn();
+        // New assignments use the permission table. Keep legacy Lost & Found
+        // staff access during migration, but never grant it to System Admin.
+        return $result = (bool)$stmt->fetchColumn()
+            || ($admin['admin_type'] !== 'main_admin' && $admin['role'] === 'lost_found');
     } catch (PDOException $e) {
         return $result = false;
     }

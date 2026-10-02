@@ -39,6 +39,7 @@ $reports =
 rel="stylesheet"
 href="../css/style.css">
 
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
 <body>

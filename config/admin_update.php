@@ -247,6 +247,7 @@ if (!$report) {
             </style>
 
             <link rel='stylesheet' href='../css/visual-3d.css'>
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
         <body>
@@ -2617,6 +2618,7 @@ body::before{
 
 
 
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
 

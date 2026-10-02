@@ -2,7 +2,7 @@
 
 require_once "database.php";
 require_once "auth.php";
-require_once "admin_management_access.php";
+require_once __DIR__ . '/admin_management_access.php';
 
 /*
 =====================================================
@@ -39,38 +39,29 @@ if (!$current_admin) {
 }
 
 
-/*
-=====================================================
-ONLY MAIN ADMIN
-=====================================================
-*/
-
 if ((int)$current_admin["must_change_password"] === 1) {
     header("Location: ../change_password.php");
     exit();
 }
 if (!adminCanManageAccounts($current_admin)) {
     http_response_code(403);
-    exit(adminAccountManagementDenialMessage($current_admin));
+    exit('Administrator account management access required.');
+}
+$is_main_admin = ($current_admin["admin_type"] ?? "admin") === "main_admin";
+if (empty($_SESSION["admin_management_csrf"])) {
+    $_SESSION["admin_management_csrf"] = bin2hex(random_bytes(32));
+}
+if ($_SERVER["REQUEST_METHOD"] === "POST"
+    && !hash_equals((string)($_SESSION["admin_management_csrf"] ?? ""), (string)($_POST["csrf_token"] ?? ""))) {
+    http_response_code(403);
+    exit('Invalid security token. Reload Admin Management and try again.');
 }
 
-
-/*
-=====================================================
-GET ADMIN ID
-=====================================================
-*/
-
-if (
-    !isset($_GET["id"]) ||
-    !is_numeric($_GET["id"])
-) {
-
+if (!isset($_GET["id"]) || !is_numeric($_GET["id"])) {
     header("Location: admin_management.php");
     exit();
 
 }
-
 $target_admin_id = (int) $_GET["id"];
 
 
@@ -87,6 +78,7 @@ $stmt = $conn->prepare(
         email,
         role,
         admin_type,
+        is_active,
         can_manage_admins
      FROM admins
      WHERE admin_id = ?"
@@ -100,38 +92,11 @@ $admin = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 
-if (!$admin) {
+if (!$admin || !adminCanManageTarget($current_admin, $admin)) {
 
     header("Location: admin_management.php");
     exit();
 
-}
-
-
-/*
-=====================================================
-PREVENT EDITING MAIN ADMIN
-=====================================================
-*/
-
-if (!adminCanManageTarget($current_admin, $admin)) {
-
-    header("Location: admin_management.php");
-    exit();
-
-}
-
-if (empty($_SESSION['admin_management_csrf'])) {
-    $_SESSION['admin_management_csrf'] = bin2hex(random_bytes(32));
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $csrfToken = $_POST['csrf_token'] ?? '';
-    if (!is_string($csrfToken)
-        || !hash_equals($_SESSION['admin_management_csrf'], $csrfToken)) {
-        http_response_code(403);
-        exit('Invalid security token. Reload Admin Management and try again.');
-    }
 }
 
 
@@ -172,6 +137,7 @@ FORM VALUES
 $name = $admin["name"];
 $email = $admin["email"];
 $role = $admin["role"];
+$can_manage_admins = (int)$admin["can_manage_admins"] === 1;
 
 $error = "";
 
@@ -187,8 +153,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $name = trim($_POST["name"] ?? "");
     $email = trim($_POST["email"] ?? "");
     $new_password = $_POST["password"] ?? "";
+    $can_manage_admins = $is_main_admin && ($_POST["can_manage_admins"] ?? "") === "1";
 
     $access_areas = $_POST["access"] ?? [];
+    $allowed_access_areas = ["technical", "administrative", "proctorial", "lost_found"];
+    if (!is_array($access_areas)) {
+        $access_areas = [];
+    }
+    $access_areas = array_values(array_unique(array_filter(
+        $access_areas,
+        static fn($area) => is_string($area) && in_array($area, $allowed_access_areas, true)
+    )));
 
 
     /*
@@ -215,6 +190,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $error =
             "New password must be at least 6 characters.";
 
+    }
+    elseif (empty($access_areas)) {
+        $error = "Select at least one UniFlow portal permission.";
+    }
+    elseif (
+        in_array("lost_found", $access_areas, true) &&
+        ($_POST["lost_found_authorized"] ?? "") !== "1"
+    ) {
+        $error = "Confirm that the relevant university authority selected this staff member before assigning Lost & Found moderator permission.";
+    }
+    elseif ($can_manage_admins && !in_array("administrative", $access_areas, true)) {
+        $error = "An Administrative Account Manager must have Administrative Portal access.";
     }
 
 
@@ -263,141 +250,68 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     */
 
     if ($error === "") {
-
-        if ($new_password !== "") {
-
-            $password_hash = password_hash(
-                $new_password,
-                PASSWORD_DEFAULT
-            );
-
-
-            $stmt = $conn->prepare(
-                "UPDATE admins
-                 SET
-                    name = ?,
-                    email = ?,
-                    password = ?
-                 WHERE admin_id = ?"
-            );
-
-            $stmt->bind_param(
-                "sssi",
-                $name,
-                $email,
-                $password_hash,
-                $target_admin_id
-            );
-
+        $new_role = "lost_found";
+        foreach (["technical", "administrative", "proctorial"] as $candidate_role) {
+            if (in_array($candidate_role, $access_areas, true)) {
+                $new_role = $candidate_role;
+                break;
+            }
         }
-        else {
+        if ($can_manage_admins) $new_role = "administrative";
 
-            $stmt = $conn->prepare(
-                "UPDATE admins
-                 SET
-                    name = ?,
-                    email = ?
-                 WHERE admin_id = ?"
-            );
-
-            $stmt->bind_param(
-                "ssi",
-                $name,
-                $email,
-                $target_admin_id
-            );
-
-        }
-
-
-        if ($stmt->execute()) {
-
-            $stmt->close();
-
-
-            /*
-            -----------------------------------------
-            DELETE OLD ACCESS
-            -----------------------------------------
-            */
-
-            $stmt = $conn->prepare(
-                "DELETE FROM admin_access
-                 WHERE admin_id = ?"
-            );
-
-            $stmt->bind_param(
-                "i",
-                $target_admin_id
-            );
-
-            $stmt->execute();
-
-            $stmt->close();
-
-
-            /*
-            -----------------------------------------
-            ADD NEW ACCESS
-            -----------------------------------------
-            */
-
-            if (is_array($access_areas)) {
-
-                $access_stmt = $conn->prepare(
-                    "INSERT INTO admin_access
-                    (
-                        admin_id,
-                        access_area
-                    )
-                    VALUES (?, ?)"
-                );
-
-
-                foreach ($access_areas as $area) {
-
-                    if (
-                        in_array(
-                            $area,
-                            [
-                                "technical",
-                                "administrative",
-                                "proctorial",
-                                "lost_found"
-                            ]
-                        )
-                    ) {
-
-                        $access_stmt->bind_param(
-                            "is",
-                            $target_admin_id,
-                            $area
-                        );
-
-                        $access_stmt->execute();
-
-                    }
-
+        $password_hash = $new_password !== "" ? password_hash($new_password, PASSWORD_DEFAULT) : null;
+        $conn->begin_transaction();
+        try {
+            if ($is_main_admin) {
+                if ($password_hash !== null) {
+                    $stmt = $conn->prepare('UPDATE admins SET name = ?, email = ?, password = ?, role = ?, can_manage_admins = ?, password_change_token_hash = NULL, password_change_expires_at = NULL WHERE admin_id = ? AND admin_type = \'admin\'');
+                    $stmt->bind_param('ssssii', $name, $email, $password_hash, $new_role, $can_manage_admins, $target_admin_id);
+                } else {
+                    $stmt = $conn->prepare('UPDATE admins SET name = ?, email = ?, role = ?, can_manage_admins = ? WHERE admin_id = ? AND admin_type = \'admin\'');
+                    $stmt->bind_param('sssii', $name, $email, $new_role, $can_manage_admins, $target_admin_id);
                 }
-
-                $access_stmt->close();
-
+            } elseif ($password_hash !== null) {
+                $stmt = $conn->prepare('UPDATE admins SET name = ?, email = ?, password = ?, role = ?, password_change_token_hash = NULL, password_change_expires_at = NULL WHERE admin_id = ? AND admin_type = \'admin\' AND can_manage_admins = 0');
+                $stmt->bind_param('ssssi', $name, $email, $password_hash, $new_role, $target_admin_id);
+            } else {
+                $stmt = $conn->prepare('UPDATE admins SET name = ?, email = ?, role = ? WHERE admin_id = ? AND admin_type = \'admin\' AND can_manage_admins = 0');
+                $stmt->bind_param('sssi', $name, $email, $new_role, $target_admin_id);
             }
 
-
-            header("Location: admin_management.php");
-            exit();
-
-        }
-        else {
-
-            $error =
-                "Unable to update administrator.";
-
+            if (!$stmt || !$stmt->execute()) throw new RuntimeException('Unable to update administrator.');
             $stmt->close();
 
-        }
+            $stmt = $conn->prepare('DELETE FROM admin_access WHERE admin_id = ?');
+            $stmt->bind_param('i', $target_admin_id);
+            if (!$stmt->execute()) throw new RuntimeException('Unable to update portal access.');
+            $stmt->close();
 
+            $access_stmt = $conn->prepare('INSERT INTO admin_access (admin_id, access_area) VALUES (?, ?)');
+            foreach ($access_areas as $area) {
+                $access_stmt->bind_param('is', $target_admin_id, $area);
+                if (!$access_stmt->execute()) throw new RuntimeException('Unable to save portal access.');
+            }
+            $access_stmt->close();
+
+            if (!writeAdminAccountAudit($conn, $current_admin_id, $target_admin_id, 'updated', [
+                'name' => $name,
+                'email' => $email,
+                'role' => $new_role,
+                'access' => $access_areas,
+                'password_changed' => $password_hash !== null,
+                'can_manage_admins' => $is_main_admin ? $can_manage_admins : false
+            ])) {
+                throw new RuntimeException('Unable to record the administrator account change.');
+            }
+
+            $conn->commit();
+            header('Location: admin_management.php?updated=1');
+            exit();
+        } catch (Throwable $e) {
+            $conn->rollback();
+            error_log('UniFlow edit admin failed: ' . $e->getMessage());
+            $error = 'Unable to update administrator.';
+        }
     }
 
 }
@@ -459,6 +373,7 @@ a{text-decoration:none;color:inherit}
 @media(max-width:560px){.navbar{height:auto;padding:15px 20px;gap:10px;align-items:flex-start;flex-direction:column}.back-button{align-self:flex-end}.form-card{padding:20px}.form-actions{flex-direction:column-reverse;align-items:stretch}.cancel-button,.save-button{width:100%}}
 </style>
 
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
 
@@ -473,7 +388,7 @@ a{text-decoration:none;color:inherit}
 
 <nav class="navbar">
 
-    <a class="logo"     href="../administrative/dashboard.php">
+    <a class="logo" href="../system_admin/dashboard.php">
         <span class="logo-icon" aria-hidden="true">U</span>
         <span class="logo-word">UniFlow</span>
     </a>
@@ -528,6 +443,7 @@ a{text-decoration:none;color:inherit}
         >
 
             <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_management_csrf']) ?>">
+
 
             <div class="form-grid">
 
@@ -691,7 +607,7 @@ a{text-decoration:none;color:inherit}
                                             : "" ?>
                                     >
 
-                                    Lost & Found
+                            Lost & Found Moderator Permission
 
                                 </label>
 
@@ -699,6 +615,23 @@ a{text-decoration:none;color:inherit}
 
 
                         </div>
+
+                        <p style="margin:14px 0 8px;color:#806f64;font-size:12px;line-height:1.5">University Administration, Student Affairs or Proctorial selects the authorized staff member first. System Admin assigns the UniFlow permission after that selection.</p>
+                        <label style="display:flex;align-items:flex-start;gap:8px;color:#3a2a22;font-size:12px;line-height:1.5">
+                            <input type="checkbox" name="lost_found_authorized" value="1" style="margin-top:2px">
+                            I confirm the relevant university authority has selected this person as an authorized Lost &amp; Found moderator.
+                        </label>
+
+                        <?php if ($is_main_admin): ?>
+                        <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f1dfd1">
+                            <div class="access-title">Administrative Account Manager</div>
+                            <label style="display:flex;align-items:flex-start;gap:8px;color:#3a2a22;font-size:12px;line-height:1.5">
+                                <input type="checkbox" name="can_manage_admins" value="1" <?= $can_manage_admins ? 'checked' : '' ?> style="margin-top:2px">
+                                Appoint this staff member to manage portal administrator accounts
+                            </label>
+                            <p style="margin:7px 0 0;color:#806f64;font-size:11px;line-height:1.5">Requires Administrative Portal access. Only System Admin can appoint or remove this permission.</p>
+                        </div>
+                        <?php endif; ?>
 
                     </div>
 

@@ -11,23 +11,26 @@ if (!isset($_SESSION['admin_id'])) {
 }
 
 $currentAdminId = (int)$_SESSION['admin_id'];
-
 $currentAdmin = getAdminManagementActor($conn, $currentAdminId);
+$isMainAdmin = ($currentAdmin['admin_type'] ?? 'admin') === 'main_admin';
 
 if ($currentAdmin && (int)$currentAdmin['must_change_password'] === 1) {
     header('Location: ../change_password.php');
     exit();
 }
-if (!adminCanManageAccounts($currentAdmin)) {
-    header('Location: ../index.php');
+if (!$currentAdmin) {
+    header('Location: ../login.php');
     exit();
 }
-
+if (!adminCanManageAccounts($currentAdmin)) {
+    http_response_code(403);
+    exit('Administrator account management access required.');
+}
 if (empty($_SESSION['admin_management_csrf'])) {
     $_SESSION['admin_management_csrf'] = bin2hex(random_bytes(32));
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
-    && !hash_equals((string)$_SESSION['admin_management_csrf'], (string)($_POST['csrf_token'] ?? ''))) {
+    && !hash_equals((string)($_SESSION['admin_management_csrf'] ?? ''), (string)($_POST['csrf_token'] ?? ''))) {
     http_response_code(403);
     exit('Invalid security token. Reload Admin Management and try again.');
 }
@@ -44,7 +47,9 @@ function ensureInvitationSchema(mysqli $conn): void
         'invited_at' => 'DATETIME NULL',
         'activation_token_hash' => 'VARCHAR(255) NULL',
         'activation_expires_at' => 'DATETIME NULL',
-        'activation_used' => 'TINYINT(1) NOT NULL DEFAULT 0'
+        'activation_used' => 'TINYINT(1) NOT NULL DEFAULT 0',
+        'password_change_token_hash' => 'VARCHAR(64) NULL',
+        'password_change_expires_at' => 'DATETIME NULL'
     ];
 
     foreach ($columns as $name => $definition) {
@@ -78,6 +83,8 @@ $returnToManagement = $_SERVER['REQUEST_METHOD'] === 'POST'
     && ($_POST['return_to'] ?? '') === 'admin_management';
 $oldAccess = $_POST['access'] ?? [];
 if (!is_array($oldAccess)) $oldAccess = [];
+$oldLostFoundAuthorized = ($_POST['lost_found_authorized'] ?? '') === '1';
+$oldCanManageAdmins = $isMainAdmin && ($_POST['can_manage_admins'] ?? '') === '1';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $name = $oldName;
@@ -91,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     )));
 
     if ($name === '') {
-        $error = 'Please enter the administrator full name.';
+        $error = 'Please enter the staff member full name.';
     } elseif (!filter_var($universityEmail, FILTER_VALIDATE_EMAIL)) {
         $error = 'Please enter a valid University Email for portal login.';
     } elseif (!filter_var($personalEmail, FILTER_VALIDATE_EMAIL)) {
@@ -100,6 +107,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Manual password must be at least 8 characters.';
     } elseif (empty($accessAreas)) {
         $error = 'Please select at least one portal access area.';
+    } elseif (in_array('lost_found', $accessAreas, true) && !$oldLostFoundAuthorized) {
+        $error = 'Confirm that the relevant university authority selected this staff member before assigning Lost & Found moderator permission.';
+    } elseif ($oldCanManageAdmins && !in_array('administrative', $accessAreas, true)) {
+        $error = 'An Administrative Account Manager must have Administrative Portal access.';
     }
 
     if ($error === '') {
@@ -108,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute();
         $existing = $stmt->get_result()->fetch_assoc();
         $stmt->close();
-        if ($existing) $error = 'This University Email is already registered as an administrator.';
+        if ($existing) $error = 'This University Email is already registered as a staff account.';
     }
 
     if ($error === '' && strcasecmp($universityEmail, $personalEmail) === 0) {
@@ -123,18 +134,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
             }
         }
+        if ($oldCanManageAdmins) $role = 'administrative';
 
         $initialPassword = $passwordMode === 'manual'
             ? $manualPassword
             : rtrim(strtr(base64_encode(random_bytes(18)), '+/', '-_'), '=');
         $passwordHash = password_hash($initialPassword, PASSWORD_DEFAULT);
+        $passwordChangeToken = bin2hex(random_bytes(32));
+        $passwordChangeTokenHash = hash('sha256', $passwordChangeToken);
 
         $conn->begin_transaction();
         try {
             $stmt = $conn->prepare('INSERT INTO admins
-                (name, email, personal_email, password, role, admin_type, must_change_password, password_expires_at, invited_at, activation_token_hash, activation_expires_at, activation_used)
-                VALUES (?, ?, ?, ?, ?, \'admin\', 0, NULL, NOW(), NULL, NULL, 0)');
-            $stmt->bind_param('sssss', $name, $universityEmail, $personalEmail, $passwordHash, $role);
+                (name, email, personal_email, password, role, admin_type, is_active, can_manage_admins, must_change_password, password_expires_at, invited_at, activation_token_hash, activation_expires_at, activation_used, password_change_token_hash, password_change_expires_at)
+                VALUES (?, ?, ?, ?, ?, \'admin\', 1, ?, 0, NULL, NOW(), NULL, NULL, 0, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))');
+            $stmt->bind_param('sssssis', $name, $universityEmail, $personalEmail, $passwordHash, $role, $oldCanManageAdmins, $passwordChangeTokenHash);
             if (!$stmt->execute()) throw new RuntimeException('Could not create administrator.');
             $newAdminId = $stmt->insert_id;
             $stmt->close();
@@ -146,8 +160,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $accessStmt->close();
 
-            if (!sendAdminCredentialsEmail($personalEmail, $name, $universityEmail, $initialPassword, $accessAreas)) {
-                throw new RuntimeException('INVITATION_SEND_FAILED: Could not send administrator login details.');
+            if (!writeAdminAccountAudit($conn, $currentAdminId, $newAdminId, 'created', [
+                'name' => $name,
+                'email' => $universityEmail,
+                'role' => $role,
+                'access' => $accessAreas,
+                'can_manage_admins' => $oldCanManageAdmins
+            ])) {
+                throw new RuntimeException('Could not write administrator account audit record.');
+            }
+
+            if (!sendAdminCredentialsEmail(
+                $personalEmail,
+                $name,
+                $universityEmail,
+                $initialPassword,
+                $accessAreas,
+                uniflowPasswordChangeUrl($passwordChangeToken)
+            )) {
+                throw new RuntimeException('Could not send administrator login details.');
             }
 
             $conn->commit();
@@ -155,16 +186,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit();
         } catch (Throwable $e) {
             $conn->rollback();
-            $failureReason = $e->getMessage();
-            error_log('UniFlow add admin failed: ' . $failureReason);
-            if (str_contains($failureReason, '535-5.7.8')
-                || str_contains($failureReason, 'Username and Password not accepted')) {
-                $error = 'Gmail rejected the sender sign-in (SMTP 535). Use a newly generated Google App Password for the configured sender Gmail, then restart Apache.';
-            } elseif (str_contains($failureReason, 'INVITATION_SEND_FAILED')) {
-                $error = 'The administrator account was not saved because the login email could not be sent. Check the sender Gmail configuration and try again.';
-            } else {
-                $error = 'Could not create the administrator account. Check the PHP/Apache error log for the server-side reason.';
-            }
+            error_log('UniFlow add admin failed: ' . $e->getMessage());
+            $error = 'Could not create the administrator account or send its email. Check the UniFlow sender email configuration and try again.';
         }
     }
 }
@@ -176,6 +199,8 @@ if ($returnToManagement && $error !== '') {
         'university_email' => $oldUniversityEmail,
         'personal_email' => $oldPersonalEmail,
         'password_mode' => $oldPasswordMode,
+        'lost_found_authorized' => $oldLostFoundAuthorized,
+        'can_manage_admins' => $oldCanManageAdmins,
         'access' => array_values(array_intersect(
             $oldAccess,
             ['technical', 'administrative', 'proctorial', 'lost_found']
@@ -190,7 +215,7 @@ if ($returnToManagement && $error !== '') {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Add New Admin | UniFlow</title>
+<title>Create Staff Account | UniFlow</title>
 <style>
 :root {
     --orange: #ff6a00;
@@ -698,6 +723,7 @@ input:focus {
 @media(max-width:850px){ .form-grid{grid-template-columns:1fr;} .form-group.full{grid-column:auto;} }
 @media(max-width:560px){ .password-mode-grid{grid-template-columns:1fr;} }
 </style>
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 <body>
 <div class="orb one"></div><div class="orb two"></div><div class="cube"></div><div class="ring"></div>
@@ -708,20 +734,21 @@ input:focus {
 <main class="page">
 <section class="page-title">
   <div class="eyebrow">ADMINISTRATION</div>
-  <h1>Add New <span>Admin</span></h1>
-    <p>Create an administrator account, choose its first password, and send the login details to the administrator's personal email.</p>
+  <h1>Create Staff <span>Account</span></h1>
+    <p>Create a UniFlow staff account and assign system permissions after the responsible university office selects the staff member.</p>
 </section>
 <section class="form-card">
 <?php if ($error !== '' && $error !== 'INVITATION_SEND_FAILED'): ?><div class="error">⚠ <?= e($error) ?></div><?php endif; ?>
 <form method="POST" action="">
+<input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['admin_management_csrf'], ENT_QUOTES, 'UTF-8') ?>">
 <div class="form-grid">
 <div class="form-group">
-<label for="admin-name">Administrator Full Name</label>
-<div class="input-wrap user"><input id="admin-name" type="text" name="name" value="<?= e($oldName) ?>" placeholder="Enter administrator full name" required></div>
-<div class="help">Use the administrator's official name.</div>
+<label for="admin-name">Staff Full Name</label>
+<div class="input-wrap user"><input id="admin-name" type="text" name="name" value="<?= e($oldName) ?>" placeholder="Enter staff member full name" required></div>
+<div class="help">Use the staff member's official name.</div>
 </div>
 <div class="form-group">
-<label for="university-email">University Email <span class="email-note">(Login Email)</span></label>
+<label for="university-email">Staff University Email <span class="email-note">(Login Email)</span></label>
 <div class="input-wrap mail"><input id="university-email" type="email" name="university_email" value="<?= e($oldUniversityEmail) ?>" placeholder="admin@university.edu" required></div>
 <div class="help">This exact email will be used to log in to UniFlow after activation.</div>
 </div>
@@ -742,20 +769,24 @@ input:focus {
 <div class="input-wrap lock"><input id="manual-password" type="password" name="manual_password" minlength="8" autocomplete="new-password" placeholder="Enter at least 8 characters" <?= $oldPasswordMode === 'manual' ? 'required' : '' ?>></div>
 <div class="help">Use at least 8 characters. This password is stored securely as a hash and sent to the Personal Email.</div>
 </div>
+<div class="form-group full"><div class="help">The login email also includes an optional, one-time link to change this initial password. The administrator can keep the original password instead.</div></div>
 <div class="form-group full">
-<div class="security-box"><div class="security-icon">✉</div><div><strong>What happens after Create Admin?</strong><p>UniFlow creates the account and emails the University Email and initial password to the Personal Email above.</p><small>The administrator can keep this password or sign in and change it later. They use the University Email to log in.</small></div></div>
+<div class="security-box"><div class="security-icon">✉</div><div><strong>What happens after account creation?</strong><p>UniFlow creates the account and emails the University Email and initial password to the Personal Email above.</p><small>The staff member uses the University Email to log in.</small></div></div>
 </div>
 <div class="form-group full">
-<div class="access-box"><div class="access-head"><div><h2 class="access-title">Portal Access</h2><p class="access-subtitle">Select every portal this administrator should be able to access.</p></div><div class="access-hint">MULTI-SELECT</div></div>
+<div class="access-box"><div class="access-head"><div><h2 class="access-title">UniFlow Portal Permissions</h2><p class="access-subtitle">Grant only the system access needed for the staff member's university-assigned duties.</p></div><div class="access-hint">MULTI-SELECT</div></div>
 <div class="checkbox-grid">
 <div class="checkbox-item"><input id="access-technical" type="checkbox" name="access[]" value="technical" <?= in_array('technical',$oldAccess,true)?'checked':'' ?>><label for="access-technical"><span>⚙ Technical Portal</span><small>Technical administration and issue management</small></label></div>
 <div class="checkbox-item"><input id="access-administrative" type="checkbox" name="access[]" value="administrative" <?= in_array('administrative',$oldAccess,true)?'checked':'' ?>><label for="access-administrative"><span>▣ Administrative Portal</span><small>Administrative services and issue management</small></label></div>
 <div class="checkbox-item"><input id="access-proctorial" type="checkbox" name="access[]" value="proctorial" <?= in_array('proctorial',$oldAccess,true)?'checked':'' ?>><label for="access-proctorial"><span>◈ Proctorial Portal</span><small>Proctorial administration and issue management</small></label></div>
-<div class="checkbox-item"><input id="access-lost-found" type="checkbox" name="access[]" value="lost_found" <?= in_array('lost_found',$oldAccess,true)?'checked':'' ?>><label for="access-lost-found"><span>⌕ Lost &amp; Found Portal</span><small>Lost &amp; Found management access</small></label></div>
+<div class="checkbox-item"><input id="access-lost-found" type="checkbox" name="access[]" value="lost_found" <?= in_array('lost_found',$oldAccess,true)?'checked':'' ?>><label for="access-lost-found"><span>⌕ Lost &amp; Found Moderator Permission</span><small>Moderation tools for an authorized staff member selected by the university</small></label></div>
+</div>
+<div class="help" style="margin-top:12px">University Administration, Student Affairs or Proctorial selects the authorized staff member first. System Admin creates the UniFlow account and assigns this permission.</div>
+<label class="help" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;color:var(--ink)"><input type="checkbox" name="lost_found_authorized" value="1" <?= $oldLostFoundAuthorized ? 'checked' : '' ?> style="margin-top:2px"> I confirm the relevant university authority has selected this person as an authorized Lost &amp; Found moderator.</label>
 </div></div>
 </div>
 </div>
-<div class="form-actions"><a href="admin_management.php" class="cancel-button">Cancel</a><button type="submit" class="save-button">Create Admin &amp; Send Login Details&nbsp; →</button></div>
+<div class="form-actions"><a href="admin_management.php" class="cancel-button">Cancel</a><button type="submit" class="save-button">Create Staff Account &amp; Send Login Details&nbsp; →</button></div>
 </form>
 </section></main>
 <script>

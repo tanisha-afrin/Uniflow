@@ -9,8 +9,12 @@ $returnTo = $rawReturn === 'lost_found' ? 'lost_found' : '';
 
 function loginRedirectForAdmin(mysqli $conn, int $adminId, string $role, string $adminType): string
 {
-    if ($adminType === 'main_admin') return 'administrative/dashboard.php';
+    if ($adminType === 'main_admin') {
+        return 'system_admin/dashboard.php';
+    }
+
     $areas = getAdminAccessAreas($conn, $adminId);
+
     if (count($areas) === 1) {
         return match ($areas[0]) {
             'technical' => 'technical/dashboard.php',
@@ -20,57 +24,173 @@ function loginRedirectForAdmin(mysqli $conn, int $adminId, string $role, string 
             default => 'index.php'
         };
     }
-    if ($role === 'technical') return 'technical/dashboard.php';
-    if ($role === 'administrative') return 'administrative/dashboard.php';
-    if ($role === 'proctorial') return 'proctorial/dashboard.php';
+
+    if ($role === 'technical') {
+        return 'technical/dashboard.php';
+    }
+
+    if ($role === 'administrative') {
+        return 'administrative/dashboard.php';
+    }
+
+    if ($role === 'proctorial') {
+        return 'proctorial/dashboard.php';
+    }
+
     return 'index.php';
 }
 
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
+
     if ($email === '' || $password === '') {
+
         $error = 'Please enter both email and password.';
+
     } else {
-        $student = null; $admin = null;
-        $stmt = $conn->prepare('SELECT student_id,name,student_code,password FROM students WHERE email = ? LIMIT 1');
-        if ($stmt) { $stmt->bind_param('s',$email); $stmt->execute(); $student=$stmt->get_result()->fetch_assoc(); $stmt->close(); }
-        $stmt = $conn->prepare('SELECT admin_id,name,email,role,admin_type,is_active,password,must_change_password,password_expires_at FROM admins WHERE email = ? LIMIT 1');
-        if ($stmt) { $stmt->bind_param('s',$email); $stmt->execute(); $admin=$stmt->get_result()->fetch_assoc(); $stmt->close(); }
-        $studentOk = $student && password_verify($password,$student['password']);
-        $adminPasswordOk = $admin && password_verify($password,$admin['password']);
-        $adminActive = $admin && (int)($admin['is_active'] ?? 1) === 1;
-        $adminOk = $adminPasswordOk && $adminActive;
-        if ($adminPasswordOk && !$adminActive) {
-            $error = 'Your staff account is inactive. Contact the Administrative team.';
-        } elseif ($studentOk && !$adminPasswordOk) {
-            session_regenerate_id(true);
-            unset($_SESSION['admin_id'],$_SESSION['admin_name'],$_SESSION['admin_role'],$_SESSION['admin_type']);
-            $_SESSION['student_id']=(int)$student['student_id']; $_SESSION['student_name']=$student['name']; $_SESSION['student_code']=$student['student_code']; $_SESSION['user_type']='student';
-            header('Location: ' . ($returnTo === 'lost_found' ? 'lost_found/index.php' : 'student/dashboard.php')); exit();
+
+        $student = null;
+        $admin = null;
+
+        // Student login
+        $stmt = $conn->prepare(
+            'SELECT student_id,name,student_code,password
+             FROM students
+             WHERE email = ?
+             LIMIT 1'
+        );
+
+        if ($stmt) {
+            $stmt->bind_param('s', $email);
+            $stmt->execute();
+            $student = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
         }
+
+
+        // Admin login
+        // Only columns that actually exist in your admins table
+        $stmt = $conn->prepare(
+            'SELECT admin_id,name,email,role,is_active,password,can_manage_admins
+             FROM admins
+             WHERE email = ?
+             LIMIT 1'
+        );
+
+        if ($stmt) {
+            $stmt->bind_param('s', $email);
+            $stmt->execute();
+            $admin = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        }
+
+
+        $studentOk = $student &&
+            password_verify($password, $student['password']);
+
+        $adminPasswordOk = $admin &&
+            password_verify($password, $admin['password']);
+
+        $adminActive = $admin &&
+            (int)($admin['is_active'] ?? 1) === 1;
+
+        $adminOk = $adminPasswordOk && $adminActive;
+
+
+        if ($adminPasswordOk && !$adminActive) {
+
+            $error = 'This administrator account is deactivated. Contact the System Administrator.';
+
+        }
+
+        elseif ($studentOk && !$adminPasswordOk) {
+
+            session_regenerate_id(true);
+
+            unset(
+                $_SESSION['admin_id'],
+                $_SESSION['admin_name'],
+                $_SESSION['admin_role'],
+                $_SESSION['admin_type']
+            );
+
+            $_SESSION['student_id'] = (int)$student['student_id'];
+            $_SESSION['student_name'] = $student['name'];
+            $_SESSION['student_code'] = $student['student_code'];
+            $_SESSION['user_type'] = 'student';
+
+            header(
+                'Location: ' .
+                ($returnTo === 'lost_found'
+                    ? 'lost_found/index.php'
+                    : 'student/dashboard.php')
+            );
+
+            exit();
+        }
+
         elseif ($adminOk && !$studentOk) {
-            if ((int)$admin['must_change_password'] === 1 && !empty($admin['password_expires_at']) && strtotime($admin['password_expires_at']) < time()) {
-                $error='Your invitation has expired. Please ask the Administrative team to send a new invitation.';
-            } else {
-                session_regenerate_id(true);
-                unset($_SESSION['student_id'],$_SESSION['student_name'],$_SESSION['student_code']);
-                $_SESSION['admin_id']=(int)$admin['admin_id']; $_SESSION['admin_name']=$admin['name']; $_SESSION['admin_role']=$admin['role']; $_SESSION['admin_type']=$admin['admin_type'] ?? 'admin'; $_SESSION['user_type']='admin';
-                if ((int)$admin['must_change_password'] === 1) {
-                    if ($returnTo === 'lost_found') $_SESSION['return_to'] = 'lost_found';
-                    header('Location: change_password.php');
-                    exit();
-                }
-                if ($returnTo === 'lost_found') { header('Location: lost_found/index.php'); exit(); }
-                header('Location: ' . loginRedirectForAdmin($conn,(int)$admin['admin_id'],$admin['role'],$admin['admin_type'] ?? 'admin')); exit();
+
+            session_regenerate_id(true);
+
+            unset(
+                $_SESSION['student_id'],
+                $_SESSION['student_name'],
+                $_SESSION['student_code']
+            );
+
+            /*
+             * Your current admins table does not have admin_type.
+             * can_manage_admins is used to identify the main administrator.
+             */
+            $adminType =
+                ((int)($admin['can_manage_admins'] ?? 0) === 1)
+                ? 'main_admin'
+                : 'admin';
+
+            $_SESSION['admin_id'] = (int)$admin['admin_id'];
+            $_SESSION['admin_name'] = $admin['name'];
+            $_SESSION['admin_role'] = $admin['role'];
+            $_SESSION['admin_type'] = $adminType;
+            $_SESSION['user_type'] = 'admin';
+
+
+            if ($returnTo === 'lost_found') {
+
+                header('Location: lost_found/index.php');
+                exit();
             }
-        } elseif ($studentOk && $adminPasswordOk) {
-            $error='This email is linked to more than one account. Please use a unique email.';
-        } elseif (!$studentOk && !$adminOk) {
-            $error='Invalid email or password.';
+
+
+            header(
+                'Location: ' .
+                loginRedirectForAdmin(
+                    $conn,
+                    (int)$admin['admin_id'],
+                    $admin['role'],
+                    $adminType
+                )
+            );
+
+            exit();
+        }
+
+        elseif ($studentOk && $adminPasswordOk) {
+
+            $error =
+                'This email is linked to more than one account. Please use a unique email.';
+        }
+
+        elseif (!$studentOk && !$adminOk) {
+
+            $error = 'Invalid email or password.';
         }
     }
 }
+    
 ?>
 
 <!DOCTYPE html>
@@ -1006,6 +1126,7 @@ body::before {
 
 </style>
 
+<link rel="stylesheet" href="css/buttons.css">
 </head>
 
 <body>
@@ -1055,7 +1176,7 @@ body::before {
             </div>
 
             <div class="preview-pill">
-                Admin Management
+                System Admin
             </div>
 
             <div class="preview-pill">
@@ -1191,8 +1312,11 @@ body::before {
                 Log In ›
             </button>
 
-            <a href="forgot_password.php" style="display:block;margin:17px auto 0;color:#c2410c;text-align:center;font-size:13px;font-weight:800;text-decoration:none;">Forgot Password?</a>
-            <a href="register.php" style="display:block;margin:13px auto 0;color:#c2410c;text-align:center;font-size:13px;font-weight:800;text-decoration:none;">New here? Create a student or staff account</a>
+
+
+            <a href="forgot_password.php" class="forgot-password-link" style="display:block;margin:16px auto 0;color:#c2410c;text-align:center;font-size:13px;font-weight:800;text-decoration:none;">
+                Forgot Password?
+            </a>
 
             <a
                 href="index.php"

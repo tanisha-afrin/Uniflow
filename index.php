@@ -2301,6 +2301,7 @@ require_once "config/auth.php";
             }
         }
     </style>
+<link rel="stylesheet" href="css/buttons.css">
 </head>
 
 <body>
@@ -2666,15 +2667,15 @@ require_once "config/auth.php";
 
                     </a>
 
-                    <?php if (($_SESSION["admin_type"] ?? "admin") === "main_admin" || (($_SESSION["user_type"] ?? '') === 'admin' && ($_SESSION["admin_role"] ?? '') === 'administrative')): ?>
+                    <?php if (($_SESSION["admin_type"] ?? "admin") === "main_admin"): ?>
                     <a
-                        href="config/admin_management.php"
+                        href="system_admin/dashboard.php"
                         class="service-card reveal system-admin-card"
                     >
                         <div class="service-icon">⚙</div>
-                        <h3>Admin Management</h3>
-                        <p>Review staff signup requests and manage administrator accounts and portal access.</p>
-                        <div class="service-link">Manage Administrators <span>→</span></div>
+                        <h3>System Admin</h3>
+                        <p>Manage student and admin accounts, access control, invitations and UniFlow settings.</p>
+                        <div class="service-link">Open System Admin <span>→</span></div>
                     </a>
                     <?php endif; ?>
 

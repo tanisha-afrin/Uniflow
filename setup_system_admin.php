@@ -1,59 +1,60 @@
 <?php
 /*
- * CLI-only first Administrative account bootstrap.
- * Configure UNIFLOW_BOOTSTRAP_ADMIN_NAME, UNIFLOW_BOOTSTRAP_ADMIN_EMAIL, and
- * UNIFLOW_BOOTSTRAP_ADMIN_PASSWORD in the process environment or private .env.
+ * Local bootstrap utility. Run from the project directory with PHP CLI only:
+ *   UNIFLOW_BOOTSTRAP_EMAIL=... php setup_system_admin.php
+ * System Admin login password is fixed to 12345678.
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
     exit;
 }
 
-require_once __DIR__ . '/config/database.php';
-require_once __DIR__ . '/config/database_settings.php';
+$email = trim((string)getenv('UNIFLOW_BOOTSTRAP_EMAIL'));
+$plainPassword = '12345678';
 
-$name = trim(uniFlowEnvironmentValue('UNIFLOW_BOOTSTRAP_ADMIN_NAME'));
-$email = trim(uniFlowEnvironmentValue('UNIFLOW_BOOTSTRAP_ADMIN_EMAIL'));
-$password = uniFlowEnvironmentValue('UNIFLOW_BOOTSTRAP_ADMIN_PASSWORD');
-
-if ($name === '' || strlen($name) > 100
-    || !filter_var($email, FILTER_VALIDATE_EMAIL)
-    || strlen($password) < 12) {
-    fwrite(STDERR, "Set a valid bootstrap admin name/email and a password of at least 12 characters.\n");
+if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    fwrite(STDERR, "Set a valid UNIFLOW_BOOTSTRAP_EMAIL. The System Admin password is 12345678.\n");
     exit(2);
 }
 
-$existing = $conn->query(
-    "SELECT admin_id FROM admins WHERE admin_type = 'admin' AND role = 'administrative' AND is_active = 1 LIMIT 1"
-);
-if ($existing->num_rows > 0) {
-    fwrite(STDERR, "An active Administrative account already exists; no account was changed.\n");
-    exit(3);
+require_once __DIR__ . '/config/database.php';
+
+$check = $conn->prepare('SELECT admin_id FROM admins WHERE email = ? LIMIT 1');
+$check->bind_param('s', $email);
+$check->execute();
+$existing = $check->get_result()->fetch_assoc();
+$check->close();
+
+if ($existing) {
+    $passwordHash = password_hash($plainPassword, PASSWORD_DEFAULT);
+    $stmt = $conn->prepare(
+        "UPDATE admins
+         SET password = ?, admin_type = 'main_admin', role = 'administrative',
+             is_active = 1, can_manage_admins = 1, must_change_password = 0
+         WHERE admin_id = ?"
+    );
+    $stmt->bind_param('si', $passwordHash, $existing['admin_id']);
+
+    if (!$stmt->execute()) {
+        fwrite(STDERR, "Could not update the System Admin account: {$stmt->error}\n");
+        exit(1);
+    }
+
+    echo "System Admin password reset to 12345678 for {$email}.\n";
+    exit(0);
 }
 
-$passwordHash = password_hash($password, PASSWORD_DEFAULT);
-try {
-    $conn->begin_transaction();
-    $stmt = $conn->prepare(
-        "INSERT INTO admins
-            (name, email, password, role, admin_type, is_active, can_manage_admins, must_change_password)
-         VALUES (?, ?, ?, 'administrative', 'admin', 1, 1, 0)"
-    );
-    $stmt->bind_param('sss', $name, $email, $passwordHash);
-    $stmt->execute();
-    $adminId = (int)$conn->insert_id;
-    $stmt->close();
+$name = 'UniFlow System Admin';
+$passwordHash = password_hash($plainPassword, PASSWORD_DEFAULT);
+$stmt = $conn->prepare(
+    "INSERT INTO admins (name, email, password, role, admin_type, is_active, can_manage_admins, must_change_password)
+     VALUES (?, ?, ?, 'administrative', 'main_admin', 1, 1, 0)"
+);
+$stmt->bind_param('sss', $name, $email, $passwordHash);
 
-    $access = $conn->prepare('INSERT INTO admin_access (admin_id, access_area) VALUES (?, \'administrative\')');
-    $access->bind_param('i', $adminId);
-    $access->execute();
-    $access->close();
-    $conn->commit();
-
-    fwrite(STDOUT, "Initial Administrative account created for {$email}.\n");
-} catch (Throwable $exception) {
-    $conn->rollback();
-    error_log('[UniFlow] Initial Administrative account setup failed: ' . $exception->getMessage());
-    fwrite(STDERR, "Could not create the initial Administrative account.\n");
+if (!$stmt->execute()) {
+    fwrite(STDERR, "Could not create the System Admin account: {$stmt->error}\n");
     exit(1);
 }
+
+echo "System Admin account created for {$email} with password 12345678.\n";

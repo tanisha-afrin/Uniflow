@@ -4,7 +4,7 @@
  * UniFlow Gmail SMTP sender
  *
  * One Gmail account is used as the UniFlow sender.
- * The Personal Email entered in Add New Admin is the recipient.
+ * The Personal Email entered during staff account setup is the recipient.
  *
  * IMPORTANT:
  * - Use the Gmail address that owns the Google App Password.
@@ -58,6 +58,13 @@ define(
     'UNIFLOW_LOGIN_URL',
     'http://localhost/Uniflow/login.php'
 );
+
+function uniflowPasswordChangeUrl(string $token): string
+{
+    return rtrim(dirname(UNIFLOW_LOGIN_URL), '/')
+        . '/change_password.php?token='
+        . rawurlencode($token);
+}
 
 
 /* =========================================================
@@ -497,7 +504,8 @@ function sendAdminCredentialsEmail(
     string $adminName,
     string $universityEmail,
     string $initialPassword,
-    array $accessAreas
+    array $accessAreas,
+    string $passwordChangeUrl
 ): bool {
 
 
@@ -522,7 +530,7 @@ function sendAdminCredentialsEmail(
                 'Proctorial Portal',
 
             'lost_found' =>
-                'Lost & Found Portal'
+                'Lost & Found Moderator Permission'
 
         ][$area] ?? $area;
     }
@@ -576,14 +584,6 @@ function sendAdminCredentialsEmail(
         );
 
 
-    $passwordChangeUrl =
-        rtrim(
-            dirname(UNIFLOW_LOGIN_URL),
-            '/'
-        ) .
-        '/change_password.php';
-
-
     $safePasswordChangeUrl =
         htmlspecialchars(
             $passwordChangeUrl,
@@ -607,7 +607,7 @@ function sendAdminCredentialsEmail(
 
         "<h2 style='margin:0'>Welcome to UniFlow</h2>" .
 
-        "<p style='margin:8px 0 0'>Administrator Login Details</p>" .
+        "<p style='margin:8px 0 0'>Staff Account Login Details</p>" .
 
         "</div>" .
 
@@ -616,7 +616,7 @@ function sendAdminCredentialsEmail(
         "<p>Hello <strong>{$safeName}</strong>,</p>" .
 
         "<p>" .
-        "A UniFlow administrator account has been created for you. " .
+        "A UniFlow staff account has been created for you. " .
         "Use the following details to sign in:" .
         "</p>" .
 
@@ -635,7 +635,7 @@ function sendAdminCredentialsEmail(
         "</p>" .
 
         "<p>" .
-        "<strong>Portal Access</strong><br>" .
+        "<strong>Assigned UniFlow Permissions</strong><br>" .
         "{$safePortals}" .
         "</p>" .
 
@@ -657,15 +657,9 @@ function sendAdminCredentialsEmail(
 
         "</p>" .
 
-        "<p>" .
-        "You can keep this password or change it after signing in." .
-        "</p>" .
+        "<p>You can keep this password, or choose another one using the optional link below. The link expires in 7 days; until you use it, this password continues to work.</p>" .
 
-        "<p>" .
-        "<a href='{$safePasswordChangeUrl}'>" .
-        "Change password" .
-        "</a>" .
-        "</p>" .
+        "<p style='text-align:center;margin:22px 0'><a href='{$safePasswordChangeUrl}' style='display:inline-block;background:#fff;color:#e95700;border:1px solid #ffb981;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold'>Choose a different password</a></p>" .
 
         "</div>" .
 
@@ -680,7 +674,7 @@ function sendAdminCredentialsEmail(
     ===================================================== */
 
     $text =
-        "UniFlow Administrator Login Details\n\n" .
+        "UniFlow Staff Account Login Details\n\n" .
 
         "Hello {$adminName},\n\n" .
 
@@ -688,13 +682,13 @@ function sendAdminCredentialsEmail(
 
         "Password: {$initialPassword}\n" .
 
-        "Portal Access: {$portalText}\n\n" .
+        "Assigned UniFlow Permissions: {$portalText}\n\n" .
 
         "Sign in here:\n" .
         UNIFLOW_LOGIN_URL .
         "\n\n" .
 
-        "You can keep this password or change it after signing in:\n" .
+        "You can keep this password, or choose another one using this optional link within 7 days:\n" .
         $passwordChangeUrl .
         "\n\n" .
 
@@ -711,13 +705,13 @@ function sendAdminCredentialsEmail(
         /*
          * IMPORTANT:
          * This is the Personal Email entered
-         * in Add New Admin.
+         * during staff account setup.
          */
         $personalEmail,
 
         $adminName,
 
-        'Your UniFlow Administrator Login Details',
+        'Your UniFlow Staff Account Login Details',
 
         $html,
 
@@ -731,33 +725,39 @@ if (!function_exists('sendStudentCredentialsEmail')) {
         string $studentName,
         string $studentId,
         string $universityEmail,
-        string $initialPassword
+        string $initialPassword,
+        string $passwordChangeUrl
     ): bool {
         $safeName = htmlspecialchars($studentName, ENT_QUOTES, 'UTF-8');
         $safeId = htmlspecialchars($studentId, ENT_QUOTES, 'UTF-8');
         $safeUniversityEmail = htmlspecialchars($universityEmail, ENT_QUOTES, 'UTF-8');
         $safePassword = htmlspecialchars($initialPassword, ENT_QUOTES, 'UTF-8');
         $safeLoginUrl = htmlspecialchars(UNIFLOW_LOGIN_URL, ENT_QUOTES, 'UTF-8');
+        $safePasswordChangeUrl = htmlspecialchars($passwordChangeUrl, ENT_QUOTES, 'UTF-8');
 
         $html = "<!doctype html><html><body style='margin:0;background:#fff7f0;font-family:Arial,sans-serif;color:#2b211c'>"
             . "<div style='max-width:620px;margin:30px auto;background:#fff;border:1px solid #f1dfd1;border-radius:18px;overflow:hidden'>"
             . "<div style='background:#ff6a00;color:#fff;padding:26px 30px'><h2 style='margin:0'>Welcome to UniFlow</h2><p style='margin:8px 0 0'>Student Login Details</p></div>"
             . "<div style='padding:30px'><p>Hello <strong>{$safeName}</strong>,</p>"
-            . "<p>Your UniFlow student account has been created.</p>"
+            . "<p>Your UniFlow student login account has been created. It provides access to UniFlow and does not represent university admission or enrollment.</p>"
             . "<div style='background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:18px;margin:20px 0'>"
             . "<p><strong>Student ID</strong><br>{$safeId}</p>"
             . "<p><strong>University Login Email</strong><br>{$safeUniversityEmail}</p>"
             . "<p><strong>Password</strong><br><code style='font-size:16px'>{$safePassword}</code></p></div>"
             . "<p>Your Personal Email is only the delivery address. Use the University Email above to log in.</p>"
             . "<p style='text-align:center;margin:28px 0'><a href='{$safeLoginUrl}' style='display:inline-block;background:#ff6a00;color:#fff;text-decoration:none;padding:14px 24px;border-radius:10px;font-weight:bold'>Sign in to UniFlow</a></p>"
-            . "<p>You can keep this password or change it after signing in.</p></div></div></body></html>";
+            . "<p>You can keep this password, or choose another one using the optional link below. The link expires in 7 days; until you use it, this password continues to work.</p>"
+            . "<p style='text-align:center;margin:22px 0'><a href='{$safePasswordChangeUrl}' style='display:inline-block;background:#fff;color:#e95700;border:1px solid #ffb981;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold'>Choose a different password</a></p></div></div></body></html>";
 
         $text = "UniFlow Student Login Details\n\n"
             . "Hello {$studentName},\n\n"
             . "Student ID: {$studentId}\n"
             . "University Login Email: {$universityEmail}\n"
             . "Password: {$initialPassword}\n\n"
+            . "This account provides access to UniFlow and does not represent university admission or enrollment.\n\n"
             . "Sign in here: " . UNIFLOW_LOGIN_URL . "\n\n"
+            . "Keep the emailed password or choose another one using this optional link within 7 days:\n"
+            . $passwordChangeUrl . "\n\n"
             . "Use your University Email as the login email. Your Personal Email is only the delivery address.";
 
         return gmailSendTransactionalEmail(

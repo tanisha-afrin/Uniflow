@@ -1,7 +1,7 @@
 <?php
 require_once "database.php";
 require_once "auth.php";
-require_once "admin_management_access.php";
+require_once __DIR__ . '/admin_management_access.php';
 
 if (!isset($_SESSION["admin_id"])) {
     header("Location: ../login.php");
@@ -21,27 +21,31 @@ if (!$current_admin) {
 $is_main_admin = (($current_admin["admin_type"] ?? "admin") === "main_admin")
     && (int)$current_admin["is_active"] === 1
     && (int)$current_admin["must_change_password"] !== 1;
-$can_manage_accounts = adminCanManageAccounts($current_admin);
-if (($current_admin["admin_type"] ?? "admin") === "main_admin" && (int)$current_admin["must_change_password"] === 1) {
+if ((int)$current_admin["must_change_password"] === 1) {
     header("Location: ../change_password.php");
     exit();
 }
 if (!adminCanManageAccounts($current_admin)) {
-    http_response_code(403);
-    exit(adminAccountManagementDenialMessage($current_admin));
+    header('Location: ../index.php');
+    exit();
 }
+$can_manage_accounts = true;
 if (empty($_SESSION['admin_status_csrf'])) {
     $_SESSION['admin_status_csrf'] = bin2hex(random_bytes(32));
+}
+if (empty($_SESSION['admin_delete_csrf'])) {
+    $_SESSION['admin_delete_csrf'] = bin2hex(random_bytes(32));
 }
 if (empty($_SESSION['admin_management_csrf'])) {
     $_SESSION['admin_management_csrf'] = bin2hex(random_bytes(32));
 }
 
+$accountFilter = $is_main_admin ? '' : "WHERE admin_type = 'admin'";
 $result = $conn->query(
-    "SELECT admin_id, name, email, role, admin_type, is_active, can_manage_admins, created_at
-     FROM admins
-     " . ($is_main_admin ? '' : "WHERE admin_type = 'admin'") . "
-     ORDER BY CASE WHEN admin_type = 'main_admin' THEN 0 ELSE 1 END,
+    "SELECT admin_id, name, email, role, admin_type, is_active,
+            can_manage_admins, created_at
+     FROM admins {$accountFilter}
+     ORDER BY CASE WHEN can_manage_admins = 1 THEN 0 ELSE 1 END,
               role, admin_id"
 );
 
@@ -52,9 +56,27 @@ if ($result) {
     }
 }
 
+$auditResult = $conn->query(
+    "SELECT audit.audit_id, audit.action, audit.details_json, audit.created_at,
+            actor.name AS actor_name, target.name AS target_name
+     FROM admin_account_audit AS audit
+     LEFT JOIN admins AS actor ON actor.admin_id = audit.actor_admin_id
+     LEFT JOIN admins AS target ON target.admin_id = audit.target_admin_id
+     WHERE target.admin_type = 'admin'
+     ORDER BY audit.created_at DESC, audit.audit_id DESC
+     LIMIT 30"
+);
+$accountAudit = [];
+if ($auditResult) {
+    while ($row = $auditResult->fetch_assoc()) {
+        $row['details'] = json_decode($row['details_json'], true) ?: [];
+        $accountAudit[] = $row;
+    }
+}
+
 $dashboard_link = "../proctorial/dashboard.php";
 if (($current_admin["admin_type"] ?? "admin") === "main_admin") {
-    $dashboard_link = "../administrative/dashboard.php";
+    $dashboard_link = "../system_admin/dashboard.php";
 } elseif ($current_admin["role"] === "technical") {
     $dashboard_link = "../technical/dashboard.php";
 } elseif ($current_admin["role"] === "administrative") {
@@ -64,12 +86,16 @@ if (($current_admin["admin_type"] ?? "admin") === "main_admin") {
 }
 
 $main_count = 0;
+$manager_count = 0;
 foreach ($admins as $admin) {
     if ($admin["admin_type"] === "main_admin") {
         $main_count++;
     }
+    if ((int)$admin["can_manage_admins"] === 1) {
+        $manager_count++;
+    }
 }
-$normal_count = count(array_filter($admins, static fn(array $admin): bool => $admin["admin_type"] === "admin"));
+$normal_count = count($admins) - $main_count - $manager_count;
 $adminAddFeedback = $_SESSION['admin_add_feedback'] ?? [];
 unset($_SESSION['admin_add_feedback']);
 $adminAddError = $adminAddFeedback['error'] ?? '';
@@ -858,6 +884,7 @@ body::before{
 
 
     <link rel="stylesheet" href="../css/visual-3d.css">
+<link rel="stylesheet" href="../css/buttons.css">
 </head>
 
 <body>
@@ -877,54 +904,64 @@ body::before{
     <div class="container">
         <section class="hero">
             <div class="hero-copy">
-                <div class="badge">Administrative Control Center</div>
+                <div class="badge"><?= $is_main_admin ? 'System Admin Control Center' : 'Administrative Account Manager' ?></div>
                 <h1>Admin <span>Management</span></h1>
                 <p>
-                    Review staff signup requests, manage portal administrator accounts, and assign service access from one central panel.
+                    <?= $is_main_admin
+                        ? 'Appoint Administrative account managers, provision UniFlow staff accounts and assign portal permissions after the responsible university office selects the staff member.'
+                        : 'Manage portal administrator accounts assigned to your office. System Admin controls who can manage administrator accounts.' ?>
                 </p>
             </div>
 
             <?php if ($can_manage_accounts): ?>
                 <button class="add-button" id="add-admin-toggle" type="button" aria-controls="admin-form" aria-expanded="<?= $showAddAdminForm ? 'true' : 'false' ?>">
-                    <?= $showAddAdminForm ? 'Hide Add Admin' : 'Add New Admin' ?>
+                    <?= $showAddAdminForm ? 'Hide Form' : 'Create Portal Admin' ?>
                 </button>
             <?php endif; ?>
         </section>
 
         <div class="notice">
-            <div class="notice-icon">            <?php if ($can_manage_accounts): ?><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M3 7l4.5 4.5L12 5l4.5 6.5L21 7l-1.5 8h-15L3 7z"/></svg><?php else: ?><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg><?php endif; ?></div>
+            <div class="notice-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M3 7l4.5 4.5L12 5l4.5 6.5L21 7l-1.5 8h-15L3 7z"/></svg></div>
             <div>
-                <strong>Administrative Account Management</strong>
+                <strong><?= $is_main_admin ? "System Account Controls" : "Delegated Admin Account Controls" ?></strong>
                 <p>
-                    <?php if ($can_manage_accounts): ?>
-                        Review pending staff requests, approve portal access, invite administrators, and edit or deactivate portal administrator accounts. Student self-registration is handled separately.
+                    <?php if ($is_main_admin): ?>
+                        System Admin appoints Administrative account managers and controls system settings. Appointed managers can manage regular portal administrator accounts. System Admin accounts remain protected.
                     <?php else: ?>
-                        You can view administrator accounts, but Administrative administrators can add, edit or remove portal administrators.
+                        You can add and edit regular portal administrator accounts and deactivate or reactivate their access. System Admin and appointed account managers remain protected; only System Admin can appoint another manager.
                     <?php endif; ?>
                 </p>
             </div>
         </div>
 
         <?php if ($adminCreated): ?>
-            <div class="admin-feedback success" role="status">Administrator account created and login details were sent to the Personal Email.</div>
+            <div class="admin-feedback success" role="status">Portal administrator account created and login details were sent to the Personal Email.</div>
+        <?php endif; ?>
+
+        <?php if (isset($_GET['updated'])): ?>
+            <div class="admin-feedback success" role="status">Administrator account updated.</div>
         <?php endif; ?>
 
         <?php if (isset($_GET['status_updated'])): ?>
-            <div class="admin-feedback success" role="status">Administrator account status updated.</div>
+            <div class="admin-feedback success" role="status">Staff account status updated.</div>
+        <?php endif; ?>
+
+        <?php if (isset($_GET['status_unchanged'])): ?>
+            <div class="admin-feedback error" role="alert">Account status was unchanged. Check that the selected account is within your management access.</div>
         <?php endif; ?>
 
         <section class="stats">
             <div class="stat">
                 <div class="stat-number"><?= count($admins) ?></div>
-                <div class="stat-label">Total Administrators</div>
+                <div class="stat-label">Staff Accounts</div>
             </div>
             <div class="stat">
-                <div class="stat-number"><?= count(array_filter($admins, static fn(array $admin): bool => (int)$admin["is_active"] === 0)) ?></div>
-                <div class="stat-label">Pending / Inactive</div>
+                <div class="stat-number"><?= $is_main_admin ? $main_count : $manager_count ?></div>
+                <div class="stat-label"><?= $is_main_admin ? 'System Admin Accounts' : 'Account Managers' ?></div>
             </div>
             <div class="stat">
-                <div class="stat-number"><?= $normal_count ?></div>
-                <div class="stat-label">Portal Admins</div>
+                <div class="stat-number"><?= $is_main_admin ? $manager_count : $normal_count ?></div>
+                <div class="stat-label"><?= $is_main_admin ? 'Appointed Account Managers' : 'Regular Portal Admins' ?></div>
             </div>
         </section>
 
@@ -932,30 +969,30 @@ body::before{
         <section class="admin-form-card" id="admin-form" <?= $showAddAdminForm ? '' : 'hidden' ?>>
             <div class="admin-form-header">
                 <div>
-                    <h2>Add New Admin</h2>
-                    <p>Create an account and send its login details to the administrator's personal email.</p>
+                    <h2>Create Portal Admin Account</h2>
+                    <p>Create an administrator login and assign only the portal access needed for the staff member's duties.</p>
                 </div>
             </div>
             <?php if ($adminAddError !== ''): ?>
                 <div class="admin-feedback error" role="alert"><?= e($adminAddError) ?></div>
             <?php endif; ?>
             <form class="admin-form-body" method="post" action="add_admin.php">
-                <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_management_csrf']) ?>">
                 <input type="hidden" name="return_to" value="admin_management">
+                <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_management_csrf']) ?>">
                 <div class="admin-form-grid">
                     <div class="admin-form-field">
-                        <label for="new-admin-name">Administrator Full Name</label>
-                        <input id="new-admin-name" type="text" name="name" value="<?= e($adminAddValues['name'] ?? '') ?>" placeholder="Enter administrator full name" required>
-                        <span class="admin-form-help">Use the administrator's official name.</span>
+                        <label for="new-admin-name">Staff Full Name</label>
+                        <input id="new-admin-name" type="text" name="name" value="<?= e($adminAddValues['name'] ?? '') ?>" placeholder="Enter staff member's full name" required>
+                        <span class="admin-form-help">Use the staff member's official name.</span>
                     </div>
                     <div class="admin-form-field">
-                        <label for="new-admin-university-email">University Email (Login Email)</label>
+                        <label for="new-admin-university-email">Staff University Email (Login Email)</label>
                         <input id="new-admin-university-email" type="email" name="university_email" value="<?= e($adminAddValues['university_email'] ?? '') ?>" placeholder="admin@university.edu" required>
                     </div>
                     <div class="admin-form-field full">
-                        <label for="new-admin-personal-email">Personal Email (Delivery Email)</label>
+                        <label for="new-admin-personal-email">Personal Email (Login Details Delivery)</label>
                         <input id="new-admin-personal-email" type="email" name="personal_email" value="<?= e($adminAddValues['personal_email'] ?? '') ?>" placeholder="admin@gmail.com" required>
-                        <span class="admin-form-help">The login details will be sent here. It is not used to sign in.</span>
+                        <span class="admin-form-help">The account login details will be sent here. It is not used to sign in.</span>
                     </div>
                     <div class="admin-form-field full">
                         <label>Initial Password</label>
@@ -963,19 +1000,21 @@ body::before{
                             <label class="admin-password-mode"><input type="radio" name="password_mode" value="automated" <?= ($adminAddValues['password_mode'] ?? 'automated') !== 'manual' ? 'checked' : '' ?>> Automated</label>
                             <label class="admin-password-mode"><input type="radio" name="password_mode" value="manual" <?= ($adminAddValues['password_mode'] ?? '') === 'manual' ? 'checked' : '' ?>> Manual</label>
                         </div>
+                        <span class="admin-form-help">The email includes this initial password and an optional, one-time link to change it. The recipient can keep the original password.</span>
                     </div>
                     <div class="admin-form-field full" id="admin-manual-password-field" <?= ($adminAddValues['password_mode'] ?? '') === 'manual' ? '' : 'hidden' ?>>
                         <label for="new-admin-manual-password">Manual Password</label>
                         <input id="new-admin-manual-password" type="password" name="manual_password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters" <?= ($adminAddValues['password_mode'] ?? '') === 'manual' ? 'required' : '' ?>>
                     </div>
                     <div class="admin-form-field full">
-                        <label>Portal Access</label>
+                            <label>UniFlow Portal Permissions</label>
+                            <span class="admin-form-help">Grant only the system access needed for the staff member's university-assigned duties.</span>
                         <div class="admin-access-grid">
                             <?php foreach ([
                                 'technical' => 'Technical Portal',
                                 'administrative' => 'Administrative Portal',
                                 'proctorial' => 'Proctorial Portal',
-                                'lost_found' => 'Lost & Found Moderator'
+                                'lost_found' => 'Lost & Found Moderator Permission'
                             ] as $accessValue => $accessLabel): ?>
                                 <label class="admin-access-option">
                                     <input type="checkbox" name="access[]" value="<?= e($accessValue) ?>" <?= in_array($accessValue, $adminAddValues['access'] ?? [], true) ? 'checked' : '' ?>>
@@ -983,11 +1022,25 @@ body::before{
                                 </label>
                             <?php endforeach; ?>
                         </div>
+                        <div class="admin-form-help" style="margin-top:10px">For Lost &amp; Found moderation, University Administration, Student Affairs or Proctorial must first select an authorized staff member. System Admin assigns this permission after that selection.</div>
+                        <label class="admin-form-help" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;color:var(--uf-ink)">
+                            <input type="checkbox" name="lost_found_authorized" value="1" <?= !empty($adminAddValues['lost_found_authorized']) ? 'checked' : '' ?> style="margin-top:2px">
+                            I confirm the relevant university authority has selected this person as an authorized Lost &amp; Found moderator.
+                        </label>
                     </div>
+                    <?php if ($is_main_admin): ?>
+                    <div class="admin-form-field full">
+                        <label>Administrative Account Manager</label>
+                        <label class="admin-access-option">
+                            <input type="checkbox" name="can_manage_admins" value="1" <?= !empty($adminAddValues['can_manage_admins']) ? 'checked' : '' ?>> Appoint this staff member to manage portal administrator accounts
+                        </label>
+                        <span class="admin-form-help">This appointment requires Administrative Portal access. Account Managers can add, edit and deactivate regular admins, but cannot appoint another manager or manage System Admins.</span>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <div class="admin-form-actions">
                     <button class="admin-form-close" type="button" id="close-admin-form">Cancel</button>
-                    <button class="admin-form-submit" type="submit">Create Admin &amp; Send Login Details</button>
+                    <button class="admin-form-submit" type="submit">Create Staff Account &amp; Send Login Details</button>
                 </div>
             </form>
         </section>
@@ -998,11 +1051,11 @@ body::before{
                 <div class="table-title">
                     <div class="table-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div>
                     <div>
-                        <h2>Administrator List</h2>
-                        <p>View administrator accounts, roles and access types</p>
+                        <h2>UniFlow Staff Accounts</h2>
+        <p>View account status and assigned portal permissions</p>
                     </div>
                 </div>
-                <span class="count-pill"><?= count($admins) ?> administrator(s)</span>
+                <span class="count-pill"><?= count($admins) ?> account(s)</span>
             </div>
 
             <?php if (count($admins) > 0): ?>
@@ -1011,8 +1064,8 @@ body::before{
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Administrator</th>
-                            <th>Role</th>
+                            <th>Staff Account</th>
+                            <th>Primary Portal</th>
                             <th>Account Type</th>
                             <th>Status</th>
                             <th>Created</th>
@@ -1036,21 +1089,23 @@ body::before{
 
                             <td>
                                 <span class="role-badge">
-                                    <?= $admin["admin_type"] === "main_admin" ? "Administrative Manager" : e($admin["role"]) ?>
+                                    <?= $admin["admin_type"] === "main_admin" ? "System Admin" : e(match ($admin["role"]) { "lost_found" => "Lost & Found Moderator", "technical" => "Technical", "administrative" => "Administrative", "proctorial" => "Proctorial", default => $admin["role"] }) ?>
                                 </span>
                             </td>
 
                             <td>
-                                <?php if ($admin["admin_type"] === "main_admin"): ?>
-                                    <span class="type-badge">Administrative Manager</span>
-                                <?php else: ?>
-                                    <span class="normal-badge">Admin</span>
+                                    <?php if ($admin["admin_type"] === "main_admin"): ?>
+                                        <span class="type-badge">Main Admin</span>
+                                    <?php elseif ((int)$admin["can_manage_admins"] === 1): ?>
+                                        <span class="type-badge">Admin Manager</span>
+                                    <?php else: ?>
+                                        <span class="normal-badge">Admin</span>
                                 <?php endif; ?>
                             </td>
 
                             <td>
                                 <span class="account-state <?= (int)$admin["is_active"] === 1 ? 'active' : 'inactive' ?>">
-                                    <?= (int)$admin["is_active"] === 1 ? 'Active' : 'Pending / Inactive' ?>
+                                    <?= (int)$admin["is_active"] === 1 ? 'Active' : 'Inactive' ?>
                                 </span>
                             </td>
 
@@ -1059,24 +1114,20 @@ body::before{
                             </td>
 
                             <td>
-                                <?php if ($can_manage_accounts): ?>
-                                    <?php if ($admin["admin_type"] === "main_admin" && !$is_main_admin): ?>
-                                        <span class="protected">Protected</span>
-                                    <?php else: ?>
-                                        <div class="actions">
-                                            <a class="action edit" href="edit_admin.php?id=<?= (int)$admin["admin_id"] ?>">Edit</a>
-                                            <form method="POST" action="admin_status.php" onsubmit="return confirm('<?= (int)$admin["is_active"] === 1 ? 'Deactivate' : 'Activate' ?> this administrator?')">
-                                                <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_status_csrf']) ?>">
-                                                <input type="hidden" name="admin_id" value="<?= (int)$admin["admin_id"] ?>">
-                                                <input type="hidden" name="is_active" value="<?= (int)$admin["is_active"] === 1 ? 0 : 1 ?>">
-                                                <button class="action <?= (int)$admin["is_active"] === 1 ? 'remove' : 'edit' ?>" type="submit">
-                                                    <?= (int)$admin["is_active"] === 1 ? 'Deactivate' : 'Activate' ?>
-                                                </button>
-                                            </form>
-                                        </div>
-                                    <?php endif; ?>
+                                <?php if (adminCanManageTarget($current_admin, $admin)): ?>
+                                    <div class="actions">
+                                        <a class="action edit" href="edit_admin.php?id=<?= (int)$admin["admin_id"] ?>">Edit</a>
+                                        <form method="POST" action="admin_status.php" onsubmit="return confirm('<?= (int)$admin["is_active"] === 1 ? 'Deactivate' : 'Activate' ?> this administrator?')">
+                                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_status_csrf']) ?>">
+                                            <input type="hidden" name="admin_id" value="<?= (int)$admin["admin_id"] ?>">
+                                            <input type="hidden" name="is_active" value="<?= (int)$admin["is_active"] === 1 ? 0 : 1 ?>">
+                                            <button class="action <?= (int)$admin["is_active"] === 1 ? 'remove' : 'edit' ?>" type="submit">
+                                                <?= (int)$admin["is_active"] === 1 ? 'Deactivate' : 'Activate' ?>
+                                            </button>
+                                        </form>
+                                    </div>
                                 <?php else: ?>
-                                    <span class="view-only">View only</span>
+                                    <span class="protected"><?= $admin["admin_type"] === "main_admin" || (int)$admin["can_manage_admins"] === 1 ? 'Protected' : 'Your account' ?></span>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -1087,9 +1138,50 @@ body::before{
             <?php else: ?>
                 <div class="empty">
                     <div class="empty-icon">+</div>
-                    <h3>No administrators found</h3>
-                    <p>Add an administrator to get started.</p>
+        <h3>No portal administrator accounts found</h3>
+        <p>Create an account after the responsible university office selects the staff member.</p>
                 </div>
+            <?php endif; ?>
+        </section>
+
+        <section class="table-card" style="margin-top:22px">
+            <div class="table-top">
+                <div class="table-title">
+                    <div class="table-icon">↻</div>
+                    <div>
+                        <h2>Recent Account Activity</h2>
+                        <p>Latest account creation, edits and access status changes</p>
+                    </div>
+                </div>
+                <span class="count-pill">Last <?= count($accountAudit) ?> change(s)</span>
+            </div>
+            <?php if ($accountAudit): ?>
+            <div class="table-wrap">
+                <table style="min-width:760px">
+                    <thead><tr><th>Action</th><th>Account</th><th>Changed By</th><th>Date</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($accountAudit as $audit): ?>
+                        <?php
+                            $auditName = $audit['details']['name'] ?? $audit['target_name'] ?? 'Account';
+                            $auditEmail = $audit['details']['email'] ?? '';
+                            $auditActor = $audit['actor_name'] ?? 'Former account';
+                            $auditAction = ucfirst(str_replace('_', ' ', $audit['action']));
+                        ?>
+                        <tr>
+                            <td><span class="role-badge"><?= e($auditAction) ?></span></td>
+                            <td>
+                                <div class="name"><?= e($auditName) ?></div>
+                                <?php if ($auditEmail !== ''): ?><div class="email"><?= e($auditEmail) ?></div><?php endif; ?>
+                            </td>
+                            <td><?= e($auditActor) ?></td>
+                            <td class="date"><?= e(date('d M Y H:i', strtotime($audit['created_at']))) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php else: ?>
+                <div class="empty"><h3>No account activity yet</h3><p>Account changes will be recorded here.</p></div>
             <?php endif; ?>
         </section>
 
@@ -1110,7 +1202,7 @@ if (addAdminToggle && addAdminForm) {
     function setAdminFormVisible(visible) {
         addAdminForm.hidden = !visible;
         addAdminToggle.setAttribute('aria-expanded', String(visible));
-        addAdminToggle.textContent = visible ? 'Hide Add Admin' : 'Add New Admin';
+        addAdminToggle.textContent = visible ? 'Hide Form' : 'Create Portal Admin';
         if (visible) addAdminForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
