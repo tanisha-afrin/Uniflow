@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /config/
+Disallow: /sql/
+Disallow: /administrative/
+Disallow: /proctorial/
+Disallow: /technical/
+Disallow: /system_admin/
+Disallow: /student/
+Disallow: /lost_found/uploads/
+
+Sitemap: https://YOUR-DOMAIN.example/sitemap.xml

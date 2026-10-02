@@ -1,0 +1,2 @@
+ALTER TABLE students
+    ADD COLUMN IF NOT EXISTS personal_email VARCHAR(150) NULL AFTER email;

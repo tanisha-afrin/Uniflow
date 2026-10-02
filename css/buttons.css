@@ -1,0 +1,248 @@
+/* Shared button treatment based on the student dashboard. */
+:is(
+    button[type="submit"],
+    input[type="submit"],
+    input[type="button"],
+    .btn,
+    .button,
+    .primary-button,
+    .primary-btn,
+    .add-button,
+    .save-button,
+    .admin-form-submit,
+    .update-button,
+    .login-button,
+    .view-button
+) {
+    min-height: 42px;
+    padding: 11px 17px;
+    border: 1px solid transparent;
+    border-radius: 13px;
+    background: linear-gradient(135deg, #f97316, #c2410c);
+    color: #fff;
+    box-shadow: 0 6px 0 #9a3412, 0 13px 22px rgba(120, 53, 15, .16);
+    font: 800 13px/1.2 Inter, Arial, sans-serif;
+    text-decoration: none;
+    transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    cursor: pointer;
+}
+
+:is(
+    button[type="submit"],
+    input[type="submit"],
+    input[type="button"],
+    .btn,
+    .button,
+    .primary-button,
+    .primary-btn,
+    .add-button,
+    .save-button,
+    .admin-form-submit,
+    .update-button,
+    .login-button,
+    .view-button
+):hover {
+    background: linear-gradient(135deg, #fb8127, #b93808);
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 0 #9a3412, 0 17px 27px rgba(120, 53, 15, .2);
+}
+
+:is(
+    button[type="submit"],
+    input[type="submit"],
+    input[type="button"],
+    .btn,
+    .button,
+    .primary-button,
+    .primary-btn,
+    .add-button,
+    .save-button,
+    .admin-form-submit,
+    .update-button,
+    .login-button,
+    .view-button
+):active {
+    transform: translateY(3px);
+    box-shadow: 0 2px 0 #9a3412, 0 7px 13px rgba(120, 53, 15, .14);
+}
+
+:is(.button.save, .primary-btn.small, .primary-btn.full, .form-card .primary-btn) {
+    border: 1px solid transparent;
+    border-radius: 13px;
+    background: linear-gradient(135deg, #f97316, #c2410c);
+    color: #fff;
+    box-shadow: 0 6px 0 #9a3412, 0 13px 22px rgba(120, 53, 15, .16);
+    font-weight: 800;
+}
+
+:is(.button.save, .primary-btn.small, .primary-btn.full, .form-card .primary-btn):hover {
+    background: linear-gradient(135deg, #fb8127, #b93808);
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 0 #9a3412, 0 17px 27px rgba(120, 53, 15, .2);
+}
+
+:is(.button.save, .primary-btn.small, .primary-btn.full, .form-card .primary-btn):active {
+    transform: translateY(3px);
+    box-shadow: 0 2px 0 #9a3412, 0 7px 13px rgba(120, 53, 15, .14);
+}
+
+:is(
+    .secondary-button,
+    .btn-secondary,
+    .btn.cancel,
+    .button.cancel,
+    .button.secondary,
+    .button:not(.save),
+    .cancel-button,
+    .cancel-btn,
+    .back-button,
+    .admin-form-close,
+    .clear-btn,
+    .clear-filter,
+    .action.edit
+) {
+    min-height: 42px;
+    padding: 11px 17px;
+    border: 1px solid #f1dfd1;
+    border-radius: 13px;
+    background: linear-gradient(180deg, #fff, #fffaf6);
+    color: #2b211c;
+    box-shadow: 0 5px 0 #f0dfd2, 0 9px 17px rgba(120, 53, 15, .07);
+    font-weight: 800;
+    text-decoration: none;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    cursor: pointer;
+}
+
+:is(
+    .secondary-button,
+    .btn-secondary,
+    .btn.cancel,
+    .button.cancel,
+    .button.secondary,
+    .cancel-button,
+    .cancel-btn,
+    .back-button,
+    .admin-form-close,
+    .clear-btn,
+    .clear-filter,
+    .action.edit
+):hover {
+    border-color: #ffd5b6;
+    background: #fff;
+    color: #c2410c;
+    transform: translateY(-2px);
+    box-shadow: 0 7px 0 #f0dfd2, 0 13px 21px rgba(120, 53, 15, .1);
+}
+
+:is(
+    .nav-button:not(.primary):not([href*="logout"]),
+    .nav-links a:not(.nav-primary):not([href*="logout"]):not([href*="login"]),
+    .nav-link:not(.nav-primary):not([href*="logout"]):not([href*="login"]),
+    .nav-login:not([href*="logout"]):not([href*="login"]),
+    nav a:not(.nav-login):not(.nav-primary):not([class*="logout"]):not([href*="logout"])
+) {
+    min-height: 42px;
+    padding: 11px 17px;
+    border: 1px solid #f1dfd1;
+    border-radius: 13px;
+    background: linear-gradient(180deg, #fff, #fffaf6);
+    color: #2b211c;
+    box-shadow: 0 5px 0 #f0dfd2, 0 9px 17px rgba(120, 53, 15, .07);
+    font-weight: 800;
+    text-decoration: none;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+:is(
+    .nav-button:not(.primary):not([href*="logout"]),
+    .nav-links a:not(.nav-primary):not([href*="logout"]):not([href*="login"]),
+    .nav-link:not(.nav-primary):not([href*="logout"]):not([href*="login"]),
+    .nav-login:not([href*="logout"]):not([href*="login"]),
+    nav a:not(.nav-login):not(.nav-primary):not([class*="logout"]):not([href*="logout"])
+):hover {
+    border-color: #ffd5b6;
+    background: #fff;
+    color: #c2410c;
+    transform: translateY(-2px);
+    box-shadow: 0 7px 0 #f0dfd2, 0 13px 21px rgba(120, 53, 15, .1);
+}
+
+:is(.nav-links a, .nav-button, .nav-link, .nav-login, .navbar a, .topbar .nav a) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    border-radius: 13px;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+:is(.nav-primary, .nav-button.primary, .nav-login[href*="logout"], .nav-login[href*="login"], .logout-button, nav a[href*="logout"], .navbar a[href*="logout"], .topbar a[href*="logout"], .nav-right a[href*="logout"], .nav-links a[href*="logout"]) {
+    border-color: transparent;
+    background: linear-gradient(135deg, #f97316, #c2410c);
+    color: #fff;
+    box-shadow: 0 6px 0 #9a3412, 0 13px 22px rgba(120, 53, 15, .18);
+}
+
+:is(.nav-primary, .nav-button.primary, .nav-login[href*="logout"], .nav-login[href*="login"], .logout-button, nav a[href*="logout"], .navbar a[href*="logout"], .topbar a[href*="logout"], .nav-right a[href*="logout"], .nav-links a[href*="logout"]):hover {
+    background: linear-gradient(135deg, #fb8127, #b93808);
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 0 #9a3412, 0 17px 27px rgba(120, 53, 15, .2);
+}
+
+:is(.action.remove, .remove-button, .danger, .danger-link, .delete-button, button[class*="delete"], button[class*="remove"], button[class*="reject"], button.action-btn[aria-label*="Delete"], form[action*="delete"] button.action-btn) {
+    border-color: transparent;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #e2543f, #b42318);
+    color: #fff;
+    box-shadow: 0 5px 0 #8f1d16, 0 11px 18px rgba(143, 29, 22, .16);
+    font-weight: 800;
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+
+:is(.action.remove, .remove-button, .danger, .danger-link, .delete-button, button[class*="delete"], button[class*="remove"], button[class*="reject"], button.action-btn[aria-label*="Delete"], form[action*="delete"] button.action-btn):hover {
+    background: linear-gradient(135deg, #ed6754, #a91f16);
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 7px 0 #8f1d16, 0 15px 22px rgba(143, 29, 22, .2);
+}
+
+button.action-btn,
+button.dots-btn,
+button.close-button,
+button.password-toggle {
+    border: 1px solid #f1dfd1;
+    border-radius: 11px;
+    background: linear-gradient(180deg, #fff, #fff7f0);
+    color: #7b3a16;
+    box-shadow: 0 4px 0 #f0dfd2, 0 7px 13px rgba(120, 53, 15, .08);
+    font-weight: 800;
+    transition: transform .18s ease, box-shadow .18s ease;
+    cursor: pointer;
+}
+
+button.action-btn:hover,
+button.dots-btn:hover,
+button.close-button:hover,
+button.password-toggle:hover {
+    border-color: #ffd5b6;
+    background: #fff;
+    color: #c2410c;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 #f0dfd2, 0 11px 17px rgba(120, 53, 15, .12);
+}
+
+:is(button, input[type="submit"], input[type="button"], a):focus-visible {
+    outline: 3px solid rgba(249, 115, 22, .35);
+    outline-offset: 3px;
+}
+
+:is(button, input[type="submit"], input[type="button"]):disabled {
+    cursor: not-allowed;
+    opacity: .58;
+    transform: none;
+}

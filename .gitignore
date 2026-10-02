@@ -1,0 +1,21 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs / runtime files
+*.log
+*.tmp
+
+# Local development data
+xampp/
+
+# User-uploaded runtime files (keep the directory itself with .gitkeep)
+lost_found/uploads/*
+!lost_found/uploads/.gitkeep

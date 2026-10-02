@@ -1,0 +1,36 @@
+UNIFlow Lost & Found Login Integration
+=====================================
+
+Goal:
+The Lost & Found page uses the existing UniFlow login.php. There is NO separate Lost & Found login.
+
+When a user clicks Login inside Lost & Found:
+1. login_redirect.php sets a temporary session flag.
+2. User goes to the existing ../login.php.
+3. After successful STUDENT login, login.php should check the flag and redirect to lost_found/index.php instead of dashboard.php.
+
+In your main C:\xampp\htdocs\uniflow\login.php, find the successful-login redirect line, usually:
+
+    header("Location: dashboard.php");
+    exit;
+
+Immediately BEFORE it, add:
+
+    if (!empty($_SESSION['return_to_lost_found'])) {
+        unset($_SESSION['return_to_lost_found']);
+        header("Location: lost_found/index.php");
+        exit;
+    }
+
+Then keep the normal dashboard redirect below it for normal UniFlow login:
+
+    header("Location: dashboard.php");
+    exit;
+
+IMPORTANT:
+- Do not create another login system for Lost & Found.
+- Do not replace the existing UniFlow login page.
+- Lost & Found simply tells the existing login page where to return after login.
+- The local lost_found/logout.php logs out and returns to ../index.php.
+
+If your login.php uses a different redirect code, put the Lost & Found check at the exact point AFTER password_verify succeeds and BEFORE the dashboard redirect.
